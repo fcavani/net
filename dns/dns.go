@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
-	utilUrl "github.com/fcavani/util/net/url"
+	utilNet "github.com/fcavani/net"
+	utilUrl "github.com/fcavani/net/url"
 	"github.com/miekg/dns"
 )
 

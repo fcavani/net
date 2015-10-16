@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/fcavani/e"
-	"github.com/fcavani/util/text"
+	"github.com/fcavani/text"
 )
 
 const ErrCantGetIp = "can't get remote ip"

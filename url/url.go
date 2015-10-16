@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
+	utilNet "github.com/fcavani/net"
 )
 
 // OnlyHost returns the FQDN or the ip of the host in the url.

@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/util/net"
-	"github.com/fcavani/util/net/dns"
+	utilNet "github.com/fcavani/net"
+	"github.com/fcavani/net/dns"
 )
 
 // Command object executes conn.SetDeadline before every function calls.
