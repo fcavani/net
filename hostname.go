@@ -12,8 +12,9 @@ import (
 )
 
 type Addr struct {
-	Ip string
-	Name string
+	Ip      string `json:"ip"`
+	Name    string `json:"name,omitempty"`
+	Proxies []string `json:"proxies,omitempty"`
 }
 
 func HostnameFqdn() (hostname string, err error) {
