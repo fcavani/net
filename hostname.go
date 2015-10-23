@@ -5,15 +5,15 @@
 package net
 
 import (
-	"net/http"
 	"encoding/json"
-	
+	"net/http"
+
 	"github.com/fcavani/e"
 )
 
 type Addr struct {
-	Ip      string `json:"ip"`
-	Name    string `json:"name,omitempty"`
+	Ip      string   `json:"ip"`
+	Name    string   `json:"name,omitempty"`
 	Proxies []string `json:"proxies,omitempty"`
 }
 
