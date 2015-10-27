@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
-	utilNet "github.com/fcavani/net"
 	"github.com/fcavani/net/dns"
 )
 
@@ -126,40 +125,9 @@ func EmailsToString(mails []string) (s string) {
 // and a auth.
 func SendMail(addr string, a smtp.Auth, from string, to []string, hello string, msg []byte, timeout time.Duration, insecureSkipVerify bool) error {
 	serverName := addr
-	port := ""
-	serverName, port, err := net.SplitHostPort(addr)
+	conn, err = net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
-		return e.Push(err, "invalid adderess")
-	}
-
-	if serverName == "" || port == "" {
-		return e.New("addrs is invalid")
-	}
-
-	hosts, err := dns.LookupHostCache(serverName)
-	if err != nil {
-		return e.Forward(err)
-	}
-	if len(hosts) == 0 {
-		return e.New("can't resolve the addr")
-	}
-
-	var conn net.Conn
-	for _, host := range hosts {
-		addr, err = utilNet.IpPort(host, port)
-		if err != nil {
-			err = e.Forward(err)
-			continue
-		}
-
-		conn, err = net.DialTimeout("tcp", addr, timeout)
-		if err != nil {
-			err = e.Forward(err)
-			continue
-		}
-	}
-	if conn == nil {
-		return err
+		return e.New(err)
 	}
 	defer conn.Close()
 
