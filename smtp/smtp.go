@@ -125,6 +125,16 @@ func EmailsToString(mails []string) (s string) {
 // and a auth.
 func SendMail(addr string, a smtp.Auth, from string, to []string, hello string, msg []byte, timeout time.Duration, insecureSkipVerify bool) error {
 	serverName := addr
+	port := ""
+	serverName, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return e.Push(err, "invalid adderess")
+	}
+
+	if serverName == "" || port == "" {
+		return e.New("addrs is invalid")
+	}
+
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return e.New(err)
