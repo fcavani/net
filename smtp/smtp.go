@@ -161,6 +161,7 @@ func SendMail(addr string, a smtp.Auth, from string, to []string, hello string, 
 	if conn == nil {
 		return err
 	}
+	defer conn.Close()
 
 	command := &Command{
 		Timeout: timeout,
@@ -268,6 +269,7 @@ func TestSMTP(addr string, a smtp.Auth, hello string, timeout time.Duration, ins
 	if err != nil {
 		return e.Forward(err)
 	}
+	defer conn.Close()
 
 	command := &Command{
 		Timeout: timeout,
