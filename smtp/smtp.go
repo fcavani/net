@@ -125,7 +125,7 @@ func EmailsToString(mails []string) (s string) {
 // and a auth.
 func SendMail(addr string, a smtp.Auth, from string, to []string, hello string, msg []byte, timeout time.Duration, insecureSkipVerify bool) error {
 	serverName := addr
-	conn, err = net.DialTimeout("tcp", addr, timeout)
+	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return e.New(err)
 	}
