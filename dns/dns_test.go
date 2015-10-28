@@ -47,3 +47,13 @@ func TestPtr(t *testing.T) {
 		t.Fatal("wrong host")
 	}
 }
+
+func TestLookupHostWithServers(t *testing.T) {
+	addrs, err := LookupHostWithServers("www.google.com", []string{"8.8.8.8", "8.8.4.4"}, 5, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addrs) <= 0 {
+		t.Fatal("LookupHostWithServers fail")
+	}
+}

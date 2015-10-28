@@ -35,6 +35,9 @@ func LookupIp(ip string) (host string, err error) {
 	if !utilNet.IsValidIpv4(ip) && !utilNet.IsValidIpv6(ip) {
 		return "", e.New("not a valid ip address")
 	}
+	if ip == "127.0.0.1" || ip == "::1" {
+		return "localhost", nil
+	}
 	config, err := dns.ClientConfigFromFile(ConfigurationFile)
 	if err != nil {
 		return "", e.Forward(err)
@@ -75,17 +78,39 @@ func LookupIp(ip string) (host string, err error) {
 }
 
 func LookupHost(host string) (addrs []string, err error) {
+	config, err := dns.ClientConfigFromFile(ConfigurationFile)
+	if err != nil {
+		return nil, e.Forward(err)
+	}
+	config.Timeout = Timeout
+	addrs, err = lookupHost(host, config)
+	if err != nil {
+		return nil, e.Forward(err)
+	}
+	return
+}
+
+func LookupHostWithServers(host string, servers []string, attempts int, timeout int) (addrs []string, err error) {
+	config := &dns.ClientConfig{
+		Servers:  servers,
+		Port:     "53",
+		Timeout:  timeout,
+		Attempts: attempts,
+	}
+	addrs, err = lookupHost(host, config)
+	if err != nil {
+		return nil, e.Forward(err)
+	}
+	return
+}
+
+func lookupHost(host string, config *dns.ClientConfig) (addrs []string, err error) {
 	if utilNet.IsValidIpv4(host) || utilNet.IsValidIpv6(host) {
 		return []string{host}, nil
 	}
 	if host == "localhost" {
 		return []string{"127.0.0.1", "::1"}, nil
 	}
-	config, err := dns.ClientConfigFromFile(ConfigurationFile)
-	if err != nil {
-		return nil, e.Forward(err)
-	}
-	config.Timeout = Timeout
 
 	c := new(dns.Client)
 	c.DialTimeout = DialTimeout
