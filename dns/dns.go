@@ -90,11 +90,11 @@ func LookupHost(host string) (addrs []string, err error) {
 	return
 }
 
-func LookupHostWithServers(host string, servers []string, attempts int, timeout int) (addrs []string, err error) {
+func LookupHostWithServers(host string, servers []string, attempts int, timeout time.Duration) (addrs []string, err error) {
 	config := &dns.ClientConfig{
 		Servers:  servers,
 		Port:     "53",
-		Timeout:  timeout,
+		Timeout:  int(timeout / time.Second),
 		Attempts: attempts,
 	}
 	addrs, err = lookupHost(host, config)
