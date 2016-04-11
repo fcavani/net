@@ -82,6 +82,12 @@ func (c *Command) ExecTimeout(timeout time.Duration, f interface{}, args ...inte
 			}
 		}
 		values := val.Call(a)
+		if timeout != 0 {
+			err = c.Conn.SetDeadline(time.Time{})
+			if err != nil {
+				log.Println("SetDeadline failed with error:", e.Trace(e.Forward(err)))
+			}
+		}
 		setError(values, err)
 		retvals <- values
 	}()
