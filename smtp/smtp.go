@@ -241,7 +241,7 @@ func TestSMTP(addr string, a smtp.Auth, hello string, timeout time.Duration, ins
 		return e.New("addrs is invalid")
 	}
 
-	hosts, err := dns.LookupHostCache(serverName)
+	hosts, err := dns.LookupHost(serverName)
 	if err != nil {
 		return e.Forward(err)
 	}

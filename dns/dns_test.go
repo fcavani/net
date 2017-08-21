@@ -7,11 +7,16 @@ package dns
 import (
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/fcavani/e"
 )
 
 func TestResolveUrl(t *testing.T) {
+	DialTimeout = 10 * time.Second
+	ReadTimeout = 10 * time.Second
+	WriteTimeout = 10 * time.Second
+
 	url, err := url.Parse("http://localhost:8080/foo.html?q=search#fragment")
 	if err != nil {
 		t.Fatal("parse failed", err)
