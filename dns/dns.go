@@ -69,12 +69,6 @@ func LookupIp(ip string) (host string, err error) {
 		return "", e.New("not a valid ip address")
 	}
 
-	// config, err := dns.ClientConfigFromFile(ConfigurationFile)
-	// if err != nil {
-	// 	return "", e.Forward(err)
-	// }
-	// config.Timeout = Timeout
-
 	c := new(dns.Client)
 	c.DialTimeout = DialTimeout
 	c.ReadTimeout = ReadTimeout
@@ -120,11 +114,7 @@ func LookupHost(host string) (addrs []string, err error) {
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("LookupHost %v took: %v", host, time.Since(start))
 	}()
-	// config, err := dns.ClientConfigFromFile(ConfigurationFile)
-	// if err != nil {
-	// 	return nil, e.Forward(err)
-	// }
-	// config.Timeout = Timeout
+
 	addrs, err = lookupHost(host, config)
 	if err != nil {
 		return nil, e.Forward(err)
@@ -137,12 +127,7 @@ func LookupHostWithServers(host string, servers []string, attempts int, timeout 
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("LookupHostWithServers %v took: %v", host, time.Since(start))
 	}()
-	// config := &dns.ClientConfig{
-	// 	Servers:  servers,
-	// 	Port:     "53",
-	// 	Timeout:  int(timeout / time.Second),
-	// 	Attempts: attempts,
-	// }
+
 	addrs, err = lookupHost(host, config)
 	if err != nil {
 		return nil, e.Forward(err)
@@ -279,10 +264,7 @@ func ResolveUrl(url *url.URL) (*url.URL, error) {
 	if len(url.Host) >= 3 && url.Host[1] == ':' && url.Host[2] == '/' {
 		return utilUrl.Copy(url), nil
 	}
-	// r, err := regexp.Compile(`.*\(.*\)`)
-	// if err != nil {
-	// 	return nil, e.New(err)
-	// }
+
 	mysqlNotation := regExpResolveUrl.FindAllString(url.Host, 1)
 	if len(mysqlNotation) >= 1 {
 		return utilUrl.Copy(url), nil
