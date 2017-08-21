@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
+	"github.com/fcavani/log"
 	utilNet "github.com/fcavani/net"
 	utilUrl "github.com/fcavani/net/url"
 	"github.com/miekg/dns"
@@ -21,30 +22,58 @@ import (
 
 const ErrHostNotResolved = "host name not resolved"
 
-var lookuphost func(host string) (addrs []string, err error) = LookupHost
+var Timeout = 5 //Seconds
+var ConfigurationFile = "/etc/resolv.conf"
+var DialTimeout = 10 * time.Second
+var ReadTimeout = 500 * time.Millisecond
+var WriteTimeout = 500 * time.Millisecond
 
-func SetLookupHostFunction(f func(host string) (addrs []string, err error)) {
-	lookuphost = f
+var cache Cacher
+var config *dns.ClientConfig
+
+func init() {
+	var err error
+	s := NewMem()
+	cache = NewCache(s, DefaultExpire, Sleep)
+	cache.PutAddrs("localhost", []string{"127.0.0.1", "::1"})
+	cache.PutPtr("127.0.0.1", "localhost")
+	cache.PutPtr("::1", "localhost")
+	config, err = dns.ClientConfigFromFile(ConfigurationFile)
+	if err != nil {
+		log.ErrorLevel().Tag("dns", "config").Println("config failed:", err)
+		config = new(dns.ClientConfig)
+		config.Attempts = 3
+		config.Ndots = 1
+		config.Port = "53"
+		config.Servers = []string{"8.8.8.8", "8.8.4.4"}
+	}
+	config.Timeout = Timeout
 }
 
-var Timeout = 60 //Seconds
-var ConfigurationFile = "/etc/resolv.conf"
-var DialTimeout = 30 * time.Second
-var ReadTimeout = 15 * time.Second
-var WriteTimeout = 15 * time.Second
-
 func LookupIp(ip string) (host string, err error) {
-	if !utilNet.IsValidIpv4(ip) && !utilNet.IsValidIpv6(ip) {
-		return "", e.New("not a valid ip address")
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("LookupIp %v took: %v", ip, time.Since(start))
+	}()
+
+	h := cache.Get(ip)
+	if h != nil {
+		return h.ReturnPtr()
 	}
+
 	if ip == "127.0.0.1" || ip == "::1" {
 		return "localhost", nil
 	}
-	config, err := dns.ClientConfigFromFile(ConfigurationFile)
-	if err != nil {
-		return "", e.Forward(err)
+
+	if !utilNet.IsValidIpv4(ip) && !utilNet.IsValidIpv6(ip) {
+		return "", e.New("not a valid ip address")
 	}
-	config.Timeout = Timeout
+
+	// config, err := dns.ClientConfigFromFile(ConfigurationFile)
+	// if err != nil {
+	// 	return "", e.Forward(err)
+	// }
+	// config.Timeout = Timeout
 
 	c := new(dns.Client)
 	c.DialTimeout = DialTimeout
@@ -60,31 +89,42 @@ func LookupIp(ip string) (host string, err error) {
 	for i := 0; i < len(config.Servers); i++ {
 		r, _, err = c.Exchange(m, config.Servers[i]+":"+config.Port)
 		if err != nil {
+			log.DebugLevel().Tag("dns").Printf("Lookup %v ptr fail: %v", ip, err)
 			continue
 		}
 		err = nil
+		break
 	}
 	if err != nil {
+		cache.PutServFail(ip)
 		return "", e.Forward(err)
 	}
 	if r.Rcode != dns.RcodeSuccess {
+		cache.PutServFail(ip)
 		return "", e.New("can't resolve %v", ip)
 	}
 
 	for _, a := range r.Answer {
 		if ptr, ok := a.(*dns.PTR); ok {
-			return strings.TrimSuffix(ptr.Ptr, "."), nil
+			ptraddr := strings.TrimSuffix(ptr.Ptr, ".")
+			cache.PutPtr(ip, ptraddr)
+			return ptraddr, nil
 		}
 	}
+	cache.PutServFail(ip)
 	return "", e.New("no ptr available")
 }
 
 func LookupHost(host string) (addrs []string, err error) {
-	config, err := dns.ClientConfigFromFile(ConfigurationFile)
-	if err != nil {
-		return nil, e.Forward(err)
-	}
-	config.Timeout = Timeout
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("LookupHost %v took: %v", host, time.Since(start))
+	}()
+	// config, err := dns.ClientConfigFromFile(ConfigurationFile)
+	// if err != nil {
+	// 	return nil, e.Forward(err)
+	// }
+	// config.Timeout = Timeout
 	addrs, err = lookupHost(host, config)
 	if err != nil {
 		return nil, e.Forward(err)
@@ -93,12 +133,16 @@ func LookupHost(host string) (addrs []string, err error) {
 }
 
 func LookupHostWithServers(host string, servers []string, attempts int, timeout time.Duration) (addrs []string, err error) {
-	config := &dns.ClientConfig{
-		Servers:  servers,
-		Port:     "53",
-		Timeout:  int(timeout / time.Second),
-		Attempts: attempts,
-	}
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("LookupHostWithServers %v took: %v", host, time.Since(start))
+	}()
+	// config := &dns.ClientConfig{
+	// 	Servers:  servers,
+	// 	Port:     "53",
+	// 	Timeout:  int(timeout / time.Second),
+	// 	Attempts: attempts,
+	// }
 	addrs, err = lookupHost(host, config)
 	if err != nil {
 		return nil, e.Forward(err)
@@ -107,26 +151,47 @@ func LookupHostWithServers(host string, servers []string, attempts int, timeout 
 }
 
 func lookupHost(host string, config *dns.ClientConfig) (addrs []string, err error) {
-	if utilNet.IsValidIpv4(host) || utilNet.IsValidIpv6(host) {
-		return []string{host}, nil
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("lookupHost %v took: %v", host, time.Since(start))
+	}()
+
+	h := cache.Get(host)
+	if h != nil {
+		return h.ReturnAddrs()
 	}
+
 	if host == "localhost" {
 		return []string{"127.0.0.1", "::1"}, nil
 	}
+
+	if utilNet.IsValidIpv4(host) || utilNet.IsValidIpv6(host) {
+		return []string{host}, nil
+	}
+
+	defer func() {
+		if len(addrs) == 0 {
+			cache.PutServFail(host)
+		}
+		cache.PutAddrs(host, addrs)
+	}()
 
 	c := new(dns.Client)
 	c.DialTimeout = DialTimeout
 	c.ReadTimeout = ReadTimeout
 	c.WriteTimeout = WriteTimeout
+
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(host), dns.TypeA)
 	var r *dns.Msg
 	for i := 0; i < len(config.Servers); i++ {
 		r, _, err = c.Exchange(m, config.Servers[i]+":"+config.Port)
 		if err != nil {
+			log.DebugLevel().Tag("dns").Printf("Lookup addrs A %v fail: %v", host, err)
 			continue
 		}
 		err = nil
+		break
 	}
 	if err != nil {
 		return nil, e.Forward(err)
@@ -146,9 +211,11 @@ func lookupHost(host string, config *dns.ClientConfig) (addrs []string, err erro
 	for i := 0; i < len(config.Servers); i++ {
 		r, _, err = c.Exchange(m, config.Servers[0]+":"+config.Port)
 		if err != nil {
+			log.DebugLevel().Tag("dns").Printf("Lookup addrs AAAA %v fail: %v", host, err)
 			continue
 		}
 		err = nil
+		break
 	}
 	if err != nil {
 		return nil, e.Forward(err)
@@ -162,17 +229,23 @@ func lookupHost(host string, config *dns.ClientConfig) (addrs []string, err erro
 			addrs = append(addrs, addr.AAAA.String())
 		}
 	}
+
 	return
 }
 
 // Resolve simple resolver one host name to one ip
 func Resolve(h string) (out string, err error) {
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("Resolve %v took: %v", h, time.Since(start))
+	}()
+
 	host, port, err := utilNet.SplitHostPort(h)
 	if err != nil && !e.Equal(err, utilNet.ErrCantFindPort) {
 		return "", e.Forward(err)
 	}
 
-	addrs, err := lookuphost(host)
+	addrs, err := LookupHost(host)
 	if err != nil {
 		return "", e.Forward(err)
 	}
@@ -191,6 +264,8 @@ func Resolve(h string) (out string, err error) {
 	return
 }
 
+var regExpResolveUrl = regexp.MustCompile(`.*\(.*\)`)
+
 // ResolveUrl replaces the host name with the ip address. Supports ipv4 and ipv6.
 // If use in the place of host a path or a scheme for sockets, file or unix,
 // ResolveUrl will only copy the url.
@@ -204,11 +279,11 @@ func ResolveUrl(url *url.URL) (*url.URL, error) {
 	if len(url.Host) >= 3 && url.Host[1] == ':' && url.Host[2] == '/' {
 		return utilUrl.Copy(url), nil
 	}
-	r, err := regexp.Compile(`.*\(.*\)`)
-	if err != nil {
-		return nil, e.New(err)
-	}
-	mysqlNotation := r.FindAllString(url.Host, 1)
+	// r, err := regexp.Compile(`.*\(.*\)`)
+	// if err != nil {
+	// 	return nil, e.New(err)
+	// }
+	mysqlNotation := regExpResolveUrl.FindAllString(url.Host, 1)
 	if len(mysqlNotation) >= 1 {
 		return utilUrl.Copy(url), nil
 	}

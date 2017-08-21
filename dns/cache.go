@@ -9,90 +9,186 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
+	"github.com/fcavani/log"
 )
 
-// Number of entries in the cache.
-var CacheSize = 100
-
 // Time between the cleanup of the cache. Old entries are removed. In seconds.
-var Sleep int = 3600
+var Sleep = 3600 * time.Second
 
 // Time of life of one entry, in seconds. Is query is a hit this time is reseted.
-var DefaultExpire = 10 * 24 * 60 * 60
+var DefaultExpire = 24 * 60 * 60 * time.Second
 
-type host struct {
-	Addrs  []string
-	Expire time.Time
+const ErrNotFound = "entry not found"
+const ErrDupEntry = "duplicated entry"
+const ErrIterStop = "iter stop"
+
+type Host struct {
+	Addrs    []string
+	ServFail bool
+	Expire   time.Time
 }
 
-var cache map[string]*host
-var mutex *sync.RWMutex
-var hit uint64
-var miss uint64
+func (h *Host) ReturnPtr() (string, error) {
+	if h.ServFail {
+		return "", e.New("serv fail")
+	}
+	return h.Addrs[0], nil
+}
 
-func init() {
-	cache = make(map[string]*host, CacheSize)
-	mutex = new(sync.RWMutex)
+func (h *Host) ReturnAddrs() ([]string, error) {
+	if h.ServFail {
+		return nil, e.New("serv fail")
+	}
+	return h.Addrs, nil
+}
+
+type Storer interface {
+	Get(key string) (*Host, error)
+	Put(key string, data *Host) error
+	Del(key string) error
+	Iter(f func(key string, data *Host) error) error
+}
+
+type Mem struct {
+	m   map[string]*Host
+	lck sync.RWMutex
+}
+
+func NewMem() Storer {
+	return &Mem{
+		m: make(map[string]*Host),
+	}
+}
+
+func (m *Mem) Get(key string) (*Host, error) {
+	m.lck.RLock()
+	defer m.lck.RUnlock()
+	data, found := m.m[key]
+	if !found {
+		return nil, e.New(ErrNotFound)
+	}
+	return data, nil
+}
+
+func (m *Mem) Put(key string, data *Host) error {
+	m.lck.Lock()
+	defer m.lck.Unlock()
+	_, found := m.m[key]
+	if found {
+		return e.New(ErrDupEntry)
+	}
+	m.m[key] = data
+	return nil
+}
+
+func (m *Mem) Del(key string) error {
+	m.lck.Lock()
+	defer m.lck.Unlock()
+	_, found := m.m[key]
+	if !found {
+		return e.New(ErrNotFound)
+	}
+	delete(m.m, key)
+	return nil
+}
+
+func (m *Mem) Iter(f func(key string, data *Host) error) error {
+	var err error
+	for k, v := range m.m {
+		err = f(k, v)
+		if e.Equal(err, ErrIterStop) {
+			return nil
+		} else if err != nil {
+			return e.Forward(err)
+		}
+	}
+	return nil
+}
+
+type Cacher interface {
+	Get(key string) *Host
+	PutAddrs(key string, ips []string) error
+	PutPtr(key, ptr string) error
+	PutServFail(key string) error
+	Close() error
+}
+
+type Cache struct {
+	s      Storer
+	d      time.Duration
+	chstop chan chan struct{}
+}
+
+func NewCache(s Storer, d, cleanup time.Duration) Cacher {
+	c := &Cache{
+		s:      s,
+		d:      d,
+		chstop: make(chan chan struct{}),
+	}
 	go func() {
 		for {
-			time.Sleep(time.Duration(Sleep) * time.Second)
-			mutex.Lock()
-			for hostname, entry := range cache {
-				if entry.Expire.Before(time.Now()) {
-					delete(cache, hostname)
+			select {
+			case <-time.After(cleanup):
+				err := c.s.Iter(func(key string, data *Host) error {
+					if data.Expire.Before(time.Now()) {
+						er := c.s.Del(key)
+						if er != nil {
+							return e.Forward(er)
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					log.DebugLevel().Tag("dns", "cache", "cleanup").Println(err)
 				}
+			case ch := <-c.chstop:
+				ch <- struct{}{}
+				return
 			}
-			mutex.Unlock()
 		}
 	}()
+	return c
 }
 
-// Hists retuns the number of hits.
-func Hits() uint64 {
-	return hit
+func (c *Cache) Close() error {
+	ch := make(chan struct{})
+	c.chstop <- ch
+	<-ch
+	return nil
 }
 
-// Miss returns the number of cache miss.
-func Miss() uint64 {
-	return miss
-}
-
-const ErrHostFound = "host found"
-
-func addToCache(h string, addrs []string) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	cache[h] = &host{
-		Addrs:  addrs,
-		Expire: time.Now().Add(time.Duration(DefaultExpire) * time.Second),
-	}
-}
-
-func lookupInCache(h string) []string {
-	mutex.RLock()
-	defer mutex.RUnlock()
-	entry, found := cache[h]
-	if !found {
-		miss++
+func (c *Cache) Get(key string) *Host {
+	h, err := c.s.Get(key)
+	if err != nil {
 		return nil
 	}
-	hit++
-	entry.Expire = time.Now().Add(time.Duration(DefaultExpire) * time.Second)
-	return entry.Addrs
+	return h
 }
 
-// LookupHostCache do a simple lookup but if the lookup fail, its returns
-// the hosts in cache. If look is ok its store the hosts in cache or reset
-// the expire time for that host.
-func LookupHostCache(host string) ([]string, error) {
-	addrs, err := LookupHost(host)
-	if err != nil {
-		a := lookupInCache(host)
-		if a == nil {
-			return nil, e.Forward(err)
-		}
-		return a, nil
+func (c *Cache) PutAddrs(key string, ips []string) error {
+	c.s.Del(key)
+	h := &Host{
+		Addrs:  ips,
+		Expire: time.Now().Add(c.d),
 	}
-	addToCache(host, addrs)
-	return addrs, nil
+	return e.Forward(c.s.Put(key, h))
+}
+
+func (c *Cache) PutPtr(key, ptr string) error {
+	c.s.Del(key)
+	h := &Host{
+		Addrs:  []string{ptr},
+		Expire: time.Now().Add(c.d),
+	}
+	return e.Forward(c.s.Put(key, h))
+}
+
+func (c *Cache) PutServFail(key string) error {
+	c.s.Del(key)
+	h := &Host{
+		Addrs:    []string{""},
+		ServFail: true,
+		Expire:   time.Now().Add(c.d),
+	}
+	return e.Forward(c.s.Put(key, h))
 }
