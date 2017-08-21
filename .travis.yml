@@ -1,6 +1,6 @@
 language: go
 go:
- - release
+ - 1.8.3
  - tip
 matrix:
   allow_failures:
