@@ -148,7 +148,7 @@ func LookupHostWithServers(host string, servers []string, attempts int, timeout 
 	return
 }
 
-func lookupHost(host string, useCache string, config *dns.ClientConfig) (addrs []string, err error) {
+func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []string, err error) {
 	start := time.Now()
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("lookupHost %v took: %v", host, time.Since(start))
