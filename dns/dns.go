@@ -115,7 +115,20 @@ func LookupHost(host string) (addrs []string, err error) {
 		log.DebugLevel().Tag("dns").Printf("LookupHost %v took: %v", host, time.Since(start))
 	}()
 
-	addrs, err = lookupHost(host, config)
+	addrs, err = lookupHost(host, true, config)
+	if err != nil {
+		return nil, e.Forward(err)
+	}
+	return
+}
+
+func LookupHostNoCache(host string) (addrs []string, err error) {
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns").Printf("LookupHostNoCache %v took: %v", host, time.Since(start))
+	}()
+
+	addrs, err = lookupHost(host, false, config)
 	if err != nil {
 		return nil, e.Forward(err)
 	}
@@ -128,22 +141,24 @@ func LookupHostWithServers(host string, servers []string, attempts int, timeout 
 		log.DebugLevel().Tag("dns").Printf("LookupHostWithServers %v took: %v", host, time.Since(start))
 	}()
 
-	addrs, err = lookupHost(host, config)
+	addrs, err = lookupHost(host, true, config)
 	if err != nil {
 		return nil, e.Forward(err)
 	}
 	return
 }
 
-func lookupHost(host string, config *dns.ClientConfig) (addrs []string, err error) {
+func lookupHost(host string, useCache string, config *dns.ClientConfig) (addrs []string, err error) {
 	start := time.Now()
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("lookupHost %v took: %v", host, time.Since(start))
 	}()
 
-	h := cache.Get(host)
-	if h != nil {
-		return h.ReturnAddrs()
+	if useCache {
+		h := cache.Get(host)
+		if h != nil {
+			return h.ReturnAddrs()
+		}
 	}
 
 	if host == "localhost" {
