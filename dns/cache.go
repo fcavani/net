@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fcavani/e"
-	"github.com/fcavani/log"
+	log "github.com/fcavani/slog"
 )
 
 // Time between the cleanup of the cache. Old entries are removed. In seconds.
