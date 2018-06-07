@@ -21,6 +21,7 @@ var DefaultExpire = 24 * 60 * 60 * time.Second
 const ErrNotFound = "entry not found"
 const ErrDupEntry = "duplicated entry"
 const ErrIterStop = "iter stop"
+const ErrServFail = "serv fail"
 
 type Host struct {
 	Addrs    []string
@@ -30,14 +31,14 @@ type Host struct {
 
 func (h *Host) ReturnPtr() (string, error) {
 	if h.ServFail {
-		return "", e.New("serv fail")
+		return "", e.New(ErrServFail)
 	}
 	return h.Addrs[0], nil
 }
 
 func (h *Host) ReturnAddrs() ([]string, error) {
 	if h.ServFail {
-		return nil, e.New("serv fail")
+		return nil, e.New(ErrServFail)
 	}
 	return h.Addrs, nil
 }

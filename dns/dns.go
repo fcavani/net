@@ -8,6 +8,7 @@
 package dns
 
 import (
+	"context"
 	"net/url"
 	"regexp"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	utilNet "github.com/fcavani/net"
 	utilUrl "github.com/fcavani/net/url"
 	log "github.com/fcavani/slog"
+	mdns "github.com/fcavani/zeroconf"
 	"github.com/miekg/dns"
 )
 
@@ -30,6 +32,7 @@ var WriteTimeout = 500 * time.Millisecond
 
 var cache Cacher
 var config *dns.ClientConfig
+var resolver *mdns.Resolver
 
 func init() {
 	var err error
@@ -48,6 +51,23 @@ func init() {
 		config.Servers = []string{"8.8.8.8", "8.8.4.4"}
 	}
 	config.Timeout = Timeout
+
+	// lo, err := net.InterfaceByName("lo0")
+	// if err != nil {
+	// 	log.Tag("dns", "config", "interfaces").Errorln("Failed get lo interface:", err)
+	// 	return
+	// }
+	// en, err := net.InterfaceByName("en1")
+	// if err != nil {
+	// 	log.Tag("dns", "config", "interfaces").Errorln("Failed get en interface:", err)
+	// 	return
+	// }
+	// ifaces := mdns.SelectIfaces([]net.Interface{*lo})
+
+	resolver, err = mdns.NewResolver(nil)
+	if err != nil {
+		log.Tag("dns", "config").Errorln("Failed to initialize resolver:", err)
+	}
 }
 
 func LookupIp(ip string) (host string, err error) {
@@ -119,7 +139,7 @@ func LookupHost(host string) (addrs []string, err error) {
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	return
+	return addrs, nil
 }
 
 func LookupHostNoCache(host string) (addrs []string, err error) {
@@ -132,23 +152,47 @@ func LookupHostNoCache(host string) (addrs []string, err error) {
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	return
+	return addrs, nil
 }
 
-func LookupHostWithServers(host string, servers []string, attempts int, timeout time.Duration) (addrs []string, err error) {
+func LookupHostWithServers(host string, servers []string, attempts, timeout int) (addrs []string, err error) {
 	start := time.Now()
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("LookupHostWithServers %v took: %v", host, time.Since(start))
 	}()
 
-	addrs, err = lookupHost(host, true, config)
+	cfg := new(dns.ClientConfig)
+	cfg.Attempts = attempts
+	cfg.Ndots = config.Ndots
+	cfg.Port = config.Port
+	cfg.Servers = servers
+	cfg.Timeout = timeout
+
+	addrs, err = lookupHost(host, true, cfg)
 	if err != nil {
 		return nil, e.Forward(err)
 	}
-	return
+	return addrs, nil
 }
 
 func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []string, err error) {
+	addrs, err = queryDNS(host, useCache, config)
+	if err != nil && !e.Equal(err, ErrCantResolve) {
+		return nil, e.Forward(err)
+	}
+	if len(addrs) > 0 {
+		return addrs, nil
+	}
+	addrs, err = querymDNS(host, useCache)
+	if err != nil {
+		return nil, e.Forward(err)
+	}
+	return addrs, nil
+}
+
+const ErrCantResolve = "can't resolve the address"
+
+func queryDNS(host string, useCache bool, config *dns.ClientConfig) (addrs []string, err error) {
 	start := time.Now()
 	defer func() {
 		log.DebugLevel().Tag("dns").Printf("lookupHost %v took: %v", host, time.Since(start))
@@ -157,7 +201,12 @@ func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []s
 	if useCache {
 		h := cache.Get(host)
 		if h != nil {
-			return h.ReturnAddrs()
+			addrs, err = h.ReturnAddrs()
+			if !e.Equal(err, ErrServFail) {
+				return addrs, nil
+			} else if err != nil {
+				return nil, e.Push(err, ErrCantResolve)
+			}
 		}
 	}
 
@@ -172,6 +221,7 @@ func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []s
 	defer func() {
 		if len(addrs) == 0 {
 			cache.PutServFail(host)
+			return
 		}
 		cache.PutAddrs(host, addrs)
 	}()
@@ -197,7 +247,7 @@ func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []s
 		return nil, e.Forward(err)
 	}
 	if r.Rcode != dns.RcodeSuccess {
-		return nil, e.New("can't resolve %v", host)
+		return nil, e.New(ErrCantResolve)
 	}
 
 	addrs = make([]string, 0, 10)
@@ -221,13 +271,77 @@ func lookupHost(host string, useCache bool, config *dns.ClientConfig) (addrs []s
 		return nil, e.Forward(err)
 	}
 	if r.Rcode != dns.RcodeSuccess {
-		return nil, e.New("no success")
+		if len(addrs) > 0 {
+			return addrs, nil
+		}
+		return nil, e.New(ErrCantResolve)
 	}
 
 	for _, a := range r.Answer {
 		if addr, ok := a.(*dns.AAAA); ok {
 			addrs = append(addrs, addr.AAAA.String())
 		}
+	}
+
+	return
+}
+
+func querymDNS(host string, useCache bool) (addrs []string, err error) {
+	start := time.Now()
+	defer func() {
+		log.DebugLevel().Tag("dns", "mdns").Printf("lookupHost %v took: %v", host, time.Since(start))
+	}()
+
+	addrs = make([]string, 0, 10)
+
+	if useCache {
+		h := cache.Get(host)
+		if h != nil {
+			addrs, err = h.ReturnAddrs()
+			if !e.Equal(err, ErrServFail) {
+				return addrs, nil
+			} else if err != nil {
+				return nil, e.Forward(err)
+			}
+		}
+	}
+
+	defer func() {
+		if len(addrs) == 0 {
+			cache.PutServFail(host)
+			return
+		}
+		cache.PutAddrs(host, addrs)
+	}()
+
+	entries := make(chan *mdns.ServiceEntry, 10)
+
+	go func(results <-chan *mdns.ServiceEntry) {
+		for entry := range results {
+			log.Tag("dns", "mdns").Println("mDNS entry:", entry)
+			for _, ip4 := range entry.AddrIPv4 {
+				addrs = append(addrs, ip4.String())
+			}
+			for _, ip6 := range entry.AddrIPv6 {
+				addrs = append(addrs, ip6.String())
+			}
+		}
+		log.Tag("dns", "mdns").Println("No more entries.")
+	}(entries)
+
+	nodomain := strings.TrimSuffix(host, ".local")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	err = resolver.Browse(ctx, nodomain, "local.", entries)
+	if err != nil {
+		return nil, e.Push(err, "failed to browse")
+	}
+
+	<-ctx.Done()
+
+	if len(addrs) == 0 {
+		return nil, e.New("can't resolve %v", host)
 	}
 
 	return
@@ -249,7 +363,7 @@ func Resolve(h string) (out string, err error) {
 	if err != nil {
 		return "", e.Forward(err)
 	}
-	if len(addrs) <= 0 {
+	if len(addrs) == 0 {
 		return "", e.New(ErrHostNotResolved)
 	}
 
