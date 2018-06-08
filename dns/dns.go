@@ -71,7 +71,7 @@ func init() {
 	}
 }
 
-func mDNSResolverConfig(ifs []net.Interface) error {
+func MulticastDNSResolverConfig(ifs []net.Interface) error {
 	var err error
 
 	if len(ifs) == 0 {
