@@ -9,6 +9,7 @@ package dns
 
 import (
 	"context"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -68,6 +69,23 @@ func init() {
 	if err != nil {
 		log.Tag("dns", "config").Errorln("Failed to initialize resolver:", err)
 	}
+}
+
+func mDNSResolverConfig(ifs []net.Interface) error {
+	var err error
+
+	if len(ifs) == 0 {
+		return e.New("invalid interfaces")
+	}
+
+	ifaces := mdns.SelectIfaces(ifs)
+
+	resolver, err = mdns.NewResolver(ifaces)
+	if err != nil {
+		return e.New(err)
+	}
+
+	return nil
 }
 
 func LookupIp(ip string) (host string, err error) {
@@ -202,10 +220,10 @@ func queryDNS(host string, useCache bool, config *dns.ClientConfig) (addrs []str
 		h := cache.Get(host)
 		if h != nil {
 			addrs, err = h.ReturnAddrs()
-			if !e.Equal(err, ErrServFail) {
+			if err == nil {
 				return addrs, nil
-			} else if err != nil {
-				return nil, e.Push(err, ErrCantResolve)
+			} else if err != nil && !e.Equal(err, ErrServFail) {
+				return nil, e.Forward(err)
 			}
 		}
 	}
@@ -298,9 +316,9 @@ func querymDNS(host string, useCache bool) (addrs []string, err error) {
 		h := cache.Get(host)
 		if h != nil {
 			addrs, err = h.ReturnAddrs()
-			if !e.Equal(err, ErrServFail) {
+			if err == nil {
 				return addrs, nil
-			} else if err != nil {
+			} else if err != nil && !e.Equal(err, ErrServFail) {
 				return nil, e.Forward(err)
 			}
 		}
@@ -318,7 +336,7 @@ func querymDNS(host string, useCache bool) (addrs []string, err error) {
 
 	go func(results <-chan *mdns.ServiceEntry) {
 		for entry := range results {
-			log.Tag("dns", "mdns").Println("mDNS entry:", entry)
+			log.DebugLevel().Tag("dns", "mdns").Println("mDNS entry:", entry)
 			for _, ip4 := range entry.AddrIPv4 {
 				addrs = append(addrs, ip4.String())
 			}
@@ -326,12 +344,12 @@ func querymDNS(host string, useCache bool) (addrs []string, err error) {
 				addrs = append(addrs, ip6.String())
 			}
 		}
-		log.Tag("dns", "mdns").Println("No more entries.")
+		log.DebugLevel().Tag("dns", "mdns").Println("No more entries.")
 	}(entries)
 
 	nodomain := strings.TrimSuffix(host, ".local")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = resolver.Browse(ctx, nodomain, "local.", entries)
 	if err != nil {
