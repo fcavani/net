@@ -53,16 +53,6 @@ func init() {
 	}
 	config.Timeout = Timeout
 
-	// lo, err := net.InterfaceByName("lo0")
-	// if err != nil {
-	// 	log.Tag("dns", "config", "interfaces").Errorln("Failed get lo interface:", err)
-	// 	return
-	// }
-	// en, err := net.InterfaceByName("en1")
-	// if err != nil {
-	// 	log.Tag("dns", "config", "interfaces").Errorln("Failed get en interface:", err)
-	// 	return
-	// }
 	// ifaces := mdns.SelectIfaces([]net.Interface{*lo})
 
 	resolver, err = mdns.NewResolver(nil)
@@ -76,6 +66,24 @@ func MulticastDNSResolverConfig(ifs []net.Interface) error {
 
 	if len(ifs) == 0 {
 		return e.New("invalid interfaces")
+	}
+
+	ifaces := mdns.SelectIfaces(ifs)
+
+	resolver, err = mdns.NewResolver(ifaces)
+	if err != nil {
+		return e.New(err)
+	}
+
+	return nil
+}
+
+func MulticastDNSAllInterfaces() error {
+	var err error
+
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return e.New(err)
 	}
 
 	ifaces := mdns.SelectIfaces(ifs)
