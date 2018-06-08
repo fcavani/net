@@ -63,23 +63,23 @@ func TestLookupHostWithServers(t *testing.T) {
 	}
 }
 
-// func TestMDNS(t *testing.T) {
-// 	// addrs, err := querymDNS("_workstation._tcp", false)
-// 	addrs, err := querymDNS("traks.local", true)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if len(addrs) == 0 {
-// 		t.Fatal("no response")
-// 	}
-// 	t.Log(addrs)
-// 	// Cache
-// 	addrs, err = querymDNS("traks.local", true)
-// 	if err != nil {
-// 		t.Fatal(e.Trace(err))
-// 	}
-// 	if len(addrs) == 0 {
-// 		t.Fatal("no response")
-// 	}
-// 	t.Log(addrs)
-// }
+func TestMDNS(t *testing.T) {
+	// addrs, err := querymDNS("_workstation._tcp", false)
+	addrs, err := querymDNS("_companion-link._tcp.local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addrs) == 0 {
+		t.Fatal("no response")
+	}
+	t.Log(addrs)
+	// Cache
+	addrs, err = querymDNS("_companion-link._tcp.local", true)
+	if err != nil {
+		t.Fatal(e.Trace(err))
+	}
+	if len(addrs) == 0 {
+		t.Fatal("no response")
+	}
+	t.Log(addrs)
+}
