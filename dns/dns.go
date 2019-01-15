@@ -19,7 +19,7 @@ import (
 	utilNet "github.com/fcavani/net"
 	utilUrl "github.com/fcavani/net/url"
 	log "github.com/fcavani/slog"
-	mdns "github.com/fcavani/zeroconf"
+	mdns "github.com/grandcat/zeroconf"
 	"github.com/miekg/dns"
 )
 
